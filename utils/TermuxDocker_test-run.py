@@ -1,18 +1,10 @@
 #!/usr/bin/env python3
-"""
-High-level TermuxDocker testing script
-Converted from the full udocker bash test script.
-Tests pull, create, setup, run for multiple execmodes and images.
-"""
-
-import subprocess
 import os
 import sys
+import subprocess
 import shutil
 
-# ------------------------------
-# Colors and Strings
-# ------------------------------
+# --- Formatting Constants ---
 RED = '\033[1;31m'
 GREEN = '\033[1;32m'
 BLUE = '\033[1;34m'
@@ -22,391 +14,281 @@ NC = '\033[0m'
 OK_STR = f"{GREEN}[OK]{NC}"
 FAIL_STR = f"{RED}[FAIL]{NC}"
 
-# ------------------------------
-# Configuration
-# ------------------------------
-PYTHON_CMD = sys.executable
-TERMXDOCKER_CMD = os.path.expanduser("~/TermuxDocker/termuxdocker.py")
-TEST_DIR = os.path.expanduser("~/.termuxdocker-tests")
-
-if not os.path.isfile(TERMXDOCKER_CMD):
-    print(f"{FAIL_STR} TermuxDocker CLI not found at {TERMXDOCKER_CMD}")
-    sys.exit(1)
-
-os.environ["TERMXDOCKER_DIR"] = TEST_DIR
-
-# ------------------------------
-# Test containers/images
-# ------------------------------
-IMAGES = [
-    ("centos", "7"),
-    ("ubuntu", "22.04"),
-    ("openjdk", "8-jdk-alpine")
-]
-
-CONTAINERS = [
-    ("c7", "centos", "7"),
-    ("ub22", "ubuntu", "22.04"),
-    ("jv", "openjdk", "8-jdk-alpine")
-]
-
-EXECS = ["P1", "P2", "F1", "F2", "F3", "F4", "R1", "R2", "R3"]
-
 FAILED_TESTS = []
 
-# ------------------------------
-# Helper functions
-# ------------------------------
+# --- Argument Parsing & Environment ---
+if len(sys.argv) > 1:
+    TermuxDocker_CMD = sys.argv[1]
+else:
+    TermuxDocker_CMD = shutil.which("TermuxDocker")
 
-def run_td(*args):
-    """Run TermuxDocker CLI command"""
-    cmd = [PYTHON_CMD, TERMXDOCKER_CMD, *args]
-    result = subprocess.run(cmd, capture_output=True, text=True)
-    return result
+if not TermuxDocker_CMD or not os.access(TermuxDocker_CMD, os.X_OK):
+    print(f"ERROR TermuxDocker file not executable: {TermuxDocker_CMD}")
+    sys.exit(1)
 
-def print_result(returncode, msg):
-    """Assert success if returncode==0"""
-    print("\n" + "_"*120)
-    if returncode == 0:
-        print(f"{OK_STR}    {msg}")
+PYTHON_CMD = sys.argv[2] if len(sys.argv) > 2 else ""
+
+if PYTHON_CMD and not os.access(PYTHON_CMD, os.X_OK):
+    print(f"ERROR python interpreter not executable: {PYTHON_CMD}")
+    sys.exit(1)
+
+# --- Functions ---
+def print_ok():
+    print(OK_STR, end="")
+
+def print_fail():
+    print(FAIL_STR, end="")
+
+def result(ret_code, test_string):
+    print(" ")
+    if ret_code == 0:
+        print_ok()
+        print(f"    {test_string}")
     else:
-        print(f"{FAIL_STR}    {msg}")
-        FAILED_TESTS.append(msg)
-    print("_"*120 + "\n")
+        print_fail()
+        print(f"    {test_string}")
+        FAILED_TESTS.append(test_string)
+    print("\\____________________________________________________________________________________________________________________________________/")
+    print("")
+    print(" ____________________________________________________________________________________________________________________________________ ")
+    print("/                                                                                                                                    \\ ")
 
-def print_result_inv(returncode, msg):
-    """Assert success if returncode==1"""
-    print("\n" + "_"*120)
-    if returncode == 1:
-        print(f"{OK_STR}    {msg}")
-    else:
-        print(f"{FAIL_STR}    {msg}")
-        FAILED_TESTS.append(msg)
-    print("_"*120 + "\n")
-
-def cleanup():
-    """Remove test directory if exists"""
-    if os.path.exists(TEST_DIR):
-        shutil.rmtree(TEST_DIR)
-    os.makedirs(TEST_DIR, exist_ok=True)
-
-def rm_container(name):
-    run_td("rm", name)
-
-def rmi_image(image_tag):
-    run_td("rmi", image_tag)
-
-# ------------------------------
-# Setup
-# ------------------------------
-cleanup()
-print(f"{OK_STR} Test directory ready: {TEST_DIR}")
-
-# Remove any leftover containers/images (ignore errors)
-for name, _, _ in CONTAINERS:
-    rm_container(name)
-
-for image, tag in IMAGES:
-    rmi_image(f"{image}:{tag}")
-
-# ------------------------------
-# Pull Images
-# ------------------------------
-for image, tag in IMAGES:
-    res = run_td("pull", f"{image}:{tag}")
-    print_result(res.returncode, f"Pull image {image}:{tag}")
-
-# ------------------------------
-# Create containers
-# ------------------------------
-for name, image, tag in CONTAINERS:
-    res = run_td("create", "--name", name, f"{image}:{tag}")
-    print_result(res.returncode, f"Create container {name} from {image}:{tag}")
-
-# ------------------------------
-# Run tests for all execmodes
-# ------------------------------
-for execmode in EXECS:
-    print(f"\n{'='*30} Testing execmode = {execmode} {'='*30}")
+def TermuxDocker(*args):
+    """Replicates the bash TermuxDocker function: $PYTHON_CMD $TermuxDocker_CMD $*"""
+    cmd = []
+    if PYTHON_CMD:
+        cmd.append(PYTHON_CMD)
+    cmd.append(TermuxDocker_CMD)
     
-    # Setup containers
-    for name, _, _ in CONTAINERS:
-        res = run_td("setup", f"--execmode={execmode}", name)
-        print_result(res.returncode, f"Setup {name} with execmode={execmode}")
-    
-    # Run commands
-    for name, image, _ in CONTAINERS:
-        cmd = "java -version" if "jv" in name else "ls --version"
-        res = run_td("run", "--env=LANG=C", name, cmd)
-        print_result(res.returncode, f"Run {name} ({cmd}) execmode={execmode}")
+    # Flatten args in case lists are passed
+    for arg in args:
+        if isinstance(arg, list):
+            cmd.extend(arg)
+        else:
+            cmd.append(str(arg))
+            
+    process = subprocess.run(cmd)
+    return process.returncode
 
-# ------------------------------
-# Final report
-# ------------------------------
-if not FAILED_TESTS:
-    print(f"{OK_STR} All tests passed successfully!")
+# --- Main Script Execution ---
+print("=============================================")
+print("* This script tests TermuxDocker run and options *")
+print("* and volume mount options                  *")
+print("=============================================")
+
+DEFAULT_UDIR = os.path.expanduser("~/.TermuxDocker-tests")
+os.environ["TermuxDocker_DIR"] = DEFAULT_UDIR
+
+if os.path.isdir(DEFAULT_UDIR):
+    print(f"ERROR test directory exists, remove first: {DEFAULT_UDIR}")
+    sys.exit(1)
+
+print("\\____________________________________________________________________________________________________________________________________/")
+TermuxDocker("rm", "c7")
+TermuxDocker("rm", "ub22")
+TermuxDocker("rm", "jv")
+
+print("\\____________________________________________________________________________________________________________________________________/")
+TermuxDocker("rmi", "centos:7")
+TermuxDocker("rmi", "ubuntu:22.04")
+TermuxDocker("rmi", "openjdk:8-jdk-alpine")
+
+print("\\____________________________________________________________________________________________________________________________________/")
+TermuxDocker("pull", "centos:7")
+TermuxDocker("pull", "ubuntu:22.04")
+TermuxDocker("pull", "openjdk:8-jdk-alpine")
+
+print("\\____________________________________________________________________________________________________________________________________/")
+TermuxDocker("images")
+TermuxDocker("create", "--name=c7", "centos:7")
+TermuxDocker("create", "--name=ub22", "ubuntu:22.04")
+TermuxDocker("create", "--name=jv", "openjdk:8-jdk-alpine")
+TermuxDocker("ps")
+
+print("====================")
+print("* Test TermuxDocker run *")
+print("====================")
+
+# --- EXECMODE P1 ---
+print("===================================== execmode = P1")
+STRING = "T001: TermuxDocker setup jv == execmode = P1"
+ret = TermuxDocker("setup", "jv")
+result(ret, STRING)
+
+STRING = "T002: TermuxDocker run jv java -version == execmode = P1"
+ret = TermuxDocker("run", "--env=LANG=C", "jv", "java", "-version")
+result(ret, STRING)
+
+STRING = "T003: TermuxDocker setup c7 == execmode = P1"
+ret = TermuxDocker("setup", "c7")
+result(ret, STRING)
+
+STRING = "T004: TermuxDocker run c7 ls --version == execmode = P1"
+ret = TermuxDocker("run", "c7", "ls", "--version")
+result(ret, STRING)
+
+STRING = "T005: TermuxDocker setup ub22 == execmode = P1"
+ret = TermuxDocker("setup", "ub22")
+result(ret, STRING)
+
+STRING = "T006: TermuxDocker run ub22 ls --version == execmode = P1"
+ret = TermuxDocker("run", "ub22", "ls", "--version")
+result(ret, STRING)
+
+# --- EXECMODE P2 ---
+print("===================================== execmode = P2")
+STRING = "T007: TermuxDocker setup --execmode=P2 jv == execmode = P2"
+result(TermuxDocker("setup", "--execmode=P2", "jv"), STRING)
+
+STRING = "T008: TermuxDocker run jv java -version == execmode = P2"
+result(TermuxDocker("run", "--env=LANG=C", "jv", "java", "-version"), STRING)
+
+STRING = "T009: TermuxDocker setup --execmode=P2 c7 == execmode = P2"
+result(TermuxDocker("setup", "--execmode=P2", "c7"), STRING)
+
+STRING = "T010: TermuxDocker run c7 ls --version == execmode = P2"
+result(TermuxDocker("run", "c7", "ls", "--version"), STRING)
+
+STRING = "T011: TermuxDocker setup --execmode=P2 ub22 == execmode = P2"
+result(TermuxDocker("setup", "--execmode=P2", "ub22"), STRING)
+
+STRING = "T012: TermuxDocker run ub22 ls --version == execmode = P2"
+result(TermuxDocker("run", "ub22", "ls", "--version"), STRING)
+
+# --- EXECMODE F1 ---
+print("===================================== execmode = F1")
+STRING = "T013: TermuxDocker setup --execmode=F1 c7 == execmode = F1"
+result(TermuxDocker("setup", "--execmode=F1", "c7"), STRING)
+
+STRING = "T014: TermuxDocker run c7 ls --version == execmode = F1"
+result(TermuxDocker("run", "c7", "ls", "--version"), STRING)
+
+STRING = "T015: TermuxDocker setup --execmode=F1 ub22 == execmode = F1"
+result(TermuxDocker("setup", "--execmode=F1", "ub22"), STRING)
+
+STRING = "T016: TermuxDocker run ub22 ls --version == execmode = F1"
+result(TermuxDocker("run", "ub22", "ls", "--version"), STRING)
+
+# --- EXECMODE F2 ---
+print("===================================== execmode = F2")
+STRING = "T017: TermuxDocker setup --execmode=F2 c7 == execmode = F2"
+result(TermuxDocker("setup", "--execmode=F2", "c7"), STRING)
+
+STRING = "T018: TermuxDocker run c7 ls --version == execmode = F2"
+result(TermuxDocker("run", "c7", "ls", "--version"), STRING)
+
+STRING = "T019: TermuxDocker setup --execmode=F2 ub22 == execmode = F2"
+result(TermuxDocker("setup", "--execmode=F2", "ub22"), STRING)
+
+STRING = "T020: TermuxDocker run ub22 ls --version == execmode = F2"
+result(TermuxDocker("run", "ub22", "ls", "--version"), STRING)
+
+# --- EXECMODE F3 ---
+print("===================================== execmode = F3")
+STRING = "T021: TermuxDocker setup --execmode=F3 jv == execmode = F3"
+result(TermuxDocker("setup", "--execmode=F3", "jv"), STRING)
+
+STRING = "T022: TermuxDocker run jv java -version == execmode = F3"
+result(TermuxDocker("run", "--env=LANG=C", "jv", "java", "-version"), STRING)
+
+STRING = "T023: TermuxDocker setup --execmode=F3 c7 == execmode = F3"
+result(TermuxDocker("setup", "--execmode=F3", "c7"), STRING)
+
+STRING = "T024: TermuxDocker run c7 ls --version == execmode = F3"
+result(TermuxDocker("run", "c7", "ls", "--version"), STRING)
+
+STRING = "T025: TermuxDocker setup --execmode=F3 ub22 == execmode = F3"
+result(TermuxDocker("setup", "--execmode=F3", "ub22"), STRING)
+
+STRING = "T026: TermuxDocker run ub22 ls --version == execmode = F3"
+result(TermuxDocker("run", "ub22", "ls", "--version"), STRING)
+
+# --- EXECMODE F4 ---
+print("===================================== execmode = F4")
+STRING = "T027: TermuxDocker setup --execmode=F4 jv == execmode = F4"
+result(TermuxDocker("setup", "--execmode=F4", "jv"), STRING)
+
+STRING = "T028: TermuxDocker run jv java -version == execmode = F4"
+result(TermuxDocker("run", "--env=LANG=C", "jv", "java", "-version"), STRING)
+
+STRING = "T029: TermuxDocker setup --execmode=F4 c7 == execmode = F4"
+result(TermuxDocker("setup", "--execmode=F4", "c7"), STRING)
+
+STRING = "T030: TermuxDocker run c7 ls --version == execmode = F4"
+result(TermuxDocker("run", "c7", "ls", "--version"), STRING)
+
+STRING = "T031: TermuxDocker setup --execmode=F4 ub22 == execmode = F4"
+result(TermuxDocker("setup", "--execmode=F4", "ub22"), STRING)
+
+STRING = "T032: TermuxDocker run ub22 ls --version == execmode = F4"
+result(TermuxDocker("run", "ub22", "ls", "--version"), STRING)
+
+# --- EXECMODE R1 ---
+print("===================================== execmode = R1")
+STRING = "T033: TermuxDocker setup --execmode=R1 jv == execmode = R1"
+result(TermuxDocker("setup", "--execmode=R1", "jv"), STRING)
+
+STRING = "T034: TermuxDocker run jv java -version == execmode = R1"
+result(TermuxDocker("run", "--env=LANG=C", "jv", "java", "-version"), STRING)
+
+STRING = "T035: TermuxDocker setup --execmode=R1 c7 == execmode = R1"
+result(TermuxDocker("setup", "--execmode=R1", "c7"), STRING)
+
+STRING = "T036: TermuxDocker run c7 ls --version == execmode = R1"
+result(TermuxDocker("run", "c7", "ls", "--version"), STRING)
+
+STRING = "T037: TermuxDocker setup --execmode=R1 ub22 == execmode = R1"
+result(TermuxDocker("setup", "--execmode=R1", "ub22"), STRING)
+
+STRING = "T038: TermuxDocker run ub22 ls --version == execmode = R1"
+result(TermuxDocker("run", "ub22", "ls", "--version"), STRING)
+
+# --- EXECMODE R2 ---
+print("===================================== execmode = R2")
+STRING = "T039: TermuxDocker setup --execmode=R2 jv == execmode = R2"
+result(TermuxDocker("setup", "--execmode=R2", "jv"), STRING)
+
+STRING = "T040: TermuxDocker run jv java -version == execmode = R2"
+result(TermuxDocker("run", "--env=LANG=C", "jv", "java", "-version"), STRING)
+
+STRING = "T041: TermuxDocker setup --execmode=R2 c7 == execmode = R2"
+result(TermuxDocker("setup", "--execmode=R2", "c7"), STRING)
+
+STRING = "T042: TermuxDocker run c7 ls --version == execmode = R2"
+result(TermuxDocker("run", "c7", "ls", "--version"), STRING)
+
+STRING = "T043: TermuxDocker setup --execmode=R2 ub22 == execmode = R2"
+result(TermuxDocker("setup", "--execmode=R2", "ub22"), STRING)
+
+STRING = "T044: TermuxDocker run ub22 ls --version == execmode = R2"
+result(TermuxDocker("run", "ub22", "ls", "--version"), STRING)
+
+# --- EXECMODE R3 ---
+print("===================================== execmode = R3")
+STRING = "T045: TermuxDocker setup --execmode=R3 jv == execmode = R3"
+result(TermuxDocker("setup", "--execmode=R3", "jv"), STRING)
+
+STRING = "T046: TermuxDocker run jv java -version == execmode = R3"
+result(TermuxDocker("run", "--env=LANG=C", "jv", "java", "-version"), STRING)
+
+STRING = "T047: TermuxDocker setup --execmode=R3 c7 == execmode = R3"
+result(TermuxDocker("setup", "--execmode=R3", "c7"), STRING)
+
+STRING = "T048: TermuxDocker run c7 ls --version == execmode = R3"
+result(TermuxDocker("run", "c7", "ls", "--version"), STRING)
+
+STRING = "T049: TermuxDocker setup --execmode=R3 ub22 == execmode = R3"
+result(TermuxDocker("setup", "--execmode=R3", "ub22"), STRING)
+
+STRING = "T050: TermuxDocker run ub22 ls --version == execmode = R3"
+result(TermuxDocker("run", "ub22", "ls", "--version"), STRING)
+
+# --- Final Report ---
+if len(FAILED_TESTS) == 0:
+    print(f"{OK_STR}    All tests passed")
     sys.exit(0)
 else:
-    print(f"{FAIL_STR} Some tests failed:")
-    for t in FAILED_TESTS:
-        print(f"{FAIL_STR} {t}")
-    sys.exit(1)echo "============================================="
-
-DEFAULT_UDIR=$HOME/.udocker-tests
-export UDOCKER_DIR=${DEFAULT_UDIR}
-if [ -d ${DEFAULT_UDIR} ]
-then
-  echo "ERROR test directory exists, remove first: ${DEFAULT_UDIR}"
-  exit 1
-fi
-
-echo "\____________________________________________________________________________________________________________________________________/"
-udocker rm c7
-udocker rm ub22
-udocker rm jv
-
-## Use openjdk:8-jdk-alpine for regression of issue #363
-
-echo "\____________________________________________________________________________________________________________________________________/"
-udocker rmi centos:7
-udocker rmi ubuntu:22.04
-udocker rmi openjdk:8-jdk-alpine
-
-echo "\____________________________________________________________________________________________________________________________________/"
-udocker pull centos:7; return=$?
-udocker pull ubuntu:22.04; return=$?
-udocker pull openjdk:8-jdk-alpine; return=$?
-
-echo "\____________________________________________________________________________________________________________________________________/"
-udocker images; return=$?
-udocker create --name=c7 centos:7; return=$?
-udocker create --name=ub22 ubuntu:22.04; return=$?
-udocker create --name=jv openjdk:8-jdk-alpine; return=$?
-udocker ps; return=$?
-
-echo "===================="
-echo "* Test udocker run *"
-echo "===================="
-
-echo "===================================== execmode = P1"
-STRING="T001: udocker setup jv == execmode = P1"
-udocker setup jv; return=$?
-result
-
-STRING="T002: udocker run jv java -version == execmode = P1"
-udocker run --env="LANG=C" jv java -version; return=$?
-result
-
-STRING="T003: udocker setup c7 == execmode = P1"
-udocker setup c7; return=$?
-result
-
-STRING="T004: udocker run c7 ls --version == execmode = P1"
-udocker run c7 ls --version; return=$?
-result
-
-STRING="T005: udocker setup ub22 == execmode = P1"
-udocker setup ub22; return=$?
-result
-
-STRING="T006: udocker run ub22 ls --version == execmode = P1"
-udocker run ub22 ls --version; return=$?
-result
-
-echo "===================================== execmode = P2"
-STRING="T007: udocker setup --execmode=P2 jv == execmode = P2"
-udocker setup --execmode=P2 jv; return=$?
-result
-
-STRING="T008: udocker run jv java -version == execmode = P2"
-udocker run --env="LANG=C" jv java -version; return=$?
-result
-
-STRING="T009: udocker setup --execmode=P2 c7 == execmode = P2"
-udocker setup --execmode=P2 c7; return=$?
-result
-
-STRING="T010: udocker run c7 ls --version == execmode = P2"
-udocker run c7 ls --version; return=$?
-result
-
-STRING="T011: udocker setup --execmode=P2 ub22 == execmode = P2"
-udocker setup --execmode=P2 ub22; return=$?
-result
-
-STRING="T012: udocker run ub22 ls --version == execmode = P2"
-udocker run ub22 ls --version; return=$?
-result
-
-echo "===================================== execmode = F1"
-STRING="T013: udocker setup --execmode=F1 c7 == execmode = F1"
-udocker setup --execmode=F1 c7; return=$?
-result
-
-STRING="T014: udocker run c7 ls --version == execmode = F1"
-udocker run c7 ls --version; return=$?
-result
-
-STRING="T015: udocker setup --execmode=F1 ub22 == execmode = F1"
-udocker setup --execmode=F1 ub22; return=$?
-result
-
-STRING="T016: udocker run ub22 ls --version == execmode = F1"
-udocker run ub22 ls --version; return=$?
-result
-
-echo "===================================== execmode = F2"
-STRING="T017: udocker setup --execmode=F2 c7 == execmode = F2"
-udocker setup --execmode=F2 c7; return=$?
-result
-
-STRING="T018: udocker run c7 ls --version == execmode = F2"
-udocker run c7 ls --version; return=$?
-result
-
-STRING="T019: udocker setup --execmode=F2 ub22 == execmode = F2"
-udocker setup --execmode=F2 ub22; return=$?
-result
-
-STRING="T020: udocker run ub22 ls --version == execmode = F2"
-udocker run ub22 ls --version; return=$?
-result
-
-echo "===================================== execmode = F3"
-STRING="T021: udocker setup --execmode=F3 jv == execmode = F3"
-udocker setup --execmode=F3 jv; return=$?
-result
-
-STRING="T022: udocker run jv java -version == execmode = F3"
-udocker run --env="LANG=C" jv java -version; return=$?
-result
-
-STRING="T023: udocker setup --execmode=F3 c7 == execmode = F3"
-udocker setup --execmode=F3 c7; return=$?
-result
-
-STRING="T024: udocker run c7 ls --version == execmode = F3"
-udocker run c7 ls --version; return=$?
-result
-
-STRING="T025: udocker setup --execmode=F3 ub22 == execmode = F3"
-udocker setup --execmode=F3 ub22; return=$?
-result
-
-STRING="T026: udocker run ub22 ls --version == execmode = F3"
-udocker run ub22 ls --version; return=$?
-result
-
-echo "===================================== execmode = F4"
-STRING="T027: udocker setup --execmode=F4 jv == execmode = F4"
-udocker setup --execmode=F4 jv; return=$?
-result
-
-STRING="T028: udocker run jv java -version == execmode = F4"
-udocker run --env="LANG=C" jv java -version; return=$?
-result
-
-STRING="T029: udocker setup --execmode=F4 c7 == execmode = F4"
-udocker setup --execmode=F4 c7; return=$?
-result
-
-STRING="T030: udocker run c7 ls --version == execmode = F4"
-udocker run c7 ls --version; return=$?
-result
-
-STRING="T031: udocker setup --execmode=F4 ub22 == execmode = F4"
-udocker setup --execmode=F4 ub22; return=$?
-result
-
-STRING="T032: udocker run ub22 ls --version == execmode = F4"
-udocker run ub22 ls --version; return=$?
-result
-
-echo "===================================== execmode = R1"
-STRING="T033: udocker setup --execmode=R1 jv == execmode = R1"
-udocker setup --execmode=R1 jv; return=$?
-result
-
-STRING="T034: udocker run jv java -version == execmode = R1"
-udocker run --env="LANG=C" jv java -version; return=$?
-result
-
-STRING="T035: udocker setup --execmode=R1 c7 == execmode = R1"
-udocker setup --execmode=R1 c7; return=$?
-result
-
-STRING="T036: udocker run c7 ls --version == execmode = R1"
-udocker run c7 ls --version; return=$?
-result
-
-STRING="T037: udocker setup --execmode=R1 ub22 == execmode = R1"
-udocker setup --execmode=R1 ub22; return=$?
-result
-
-STRING="T038: udocker run ub22 ls --version == execmode = R1"
-udocker run ub22 ls --version; return=$?
-result
-
-echo "===================================== execmode = R2"
-STRING="T039: udocker setup --execmode=R2 jv == execmode = R2"
-udocker setup --execmode=R2 jv; return=$?
-result
-
-STRING="T040: udocker run jv java -version == execmode = R2"
-udocker run --env="LANG=C" jv java -version; return=$?
-result
-
-STRING="T041: udocker setup --execmode=R2 c7 == execmode = R2"
-udocker setup --execmode=R2 c7; return=$?
-result
-
-STRING="T042: udocker run c7 ls --version == execmode = R2"
-udocker run c7 ls --version; return=$?
-result
-
-STRING="T043: udocker setup --execmode=R2 ub22 == execmode = R2"
-udocker setup --execmode=R2 ub22; return=$?
-result
-
-STRING="T044: udocker run ub22 ls --version == execmode = R2"
-udocker run ub22 ls --version; return=$?
-result
-
-echo "===================================== execmode = R3"
-STRING="T045: udocker setup --execmode=R3 jv == execmode = R3"
-udocker setup --execmode=R3 jv; return=$?
-result
-
-STRING="T046: udocker run jv java -version == execmode = R3"
-udocker run --env="LANG=C" jv java -version; return=$?
-result
-
-STRING="T047: udocker setup --execmode=R3 c7 == execmode = R3"
-udocker setup --execmode=R3 c7; return=$?
-result
-
-STRING="T048: udocker run c7 ls --version == execmode = R3"
-udocker run c7 ls --version; return=$?
-result
-
-STRING="T049: udocker setup --execmode=R3 ub22 == execmode = R3"
-udocker setup --execmode=R3 ub22; return=$?
-result
-
-STRING="T050: udocker run ub22 ls --version == execmode = R3"
-udocker run ub22 ls --version; return=$?
-result
-
-# Report failed tests
-if [ "${#FAILED_TESTS[*]}" -le 0 ]
-then
-    printf "${OK_STR}    All tests passed\n"
-    exit 0
-fi
-
-printf "${FAIL_STR}    The following tests have failed:\n"
-for (( i=0; i<${#FAILED_TESTS[@]}; i++ ))
-do
-    printf "${FAIL_STR}    ${FAILED_TESTS[$i]}\n"
-done
-exit 1
+    print(f"{FAIL_STR}    The following tests have failed:")
+    for failed in FAILED_TESTS:
+        print(f"{FAIL_STR}    {failed}")
+    sys.exit(1)
